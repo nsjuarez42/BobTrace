@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "bobtrace": {
+      "command": "<venv>/Scripts/python.exe",
+      "args": ["-m", "bobtrace.mcp_server"],
+      "env": {
+        "BOBTRACE_FILE": "traces/traces.jsonl"
+      },
+      "comment": [
+        "Replace <venv>/Scripts/python.exe with the full path to your virtual-environment",
+        "interpreter, e.g. C:/Users/you/Dev/myproject/.venv/Scripts/python.exe (Windows)",
+        "or /home/you/myproject/.venv/bin/python (Unix/macOS).",
+        "Copy this file to .bob/mcp.json (gitignored) and adjust the path before use."
+      ]
+    }
+  }
+}

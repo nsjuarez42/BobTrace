@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bobtrace"
+version = "0.1.0"
+description = "Automatic @bob_trace injection and MCP-based execution-evidence server"
+requires-python = ">=3.10"
+# Core package uses stdlib only — no dependencies here.
+
+[project.optional-dependencies]
+server = ["mcp"]
+dev    = ["fastapi", "uvicorn", "httpx", "pytest"]
+
+[project.scripts]
+bobtrace = "bobtrace.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bobtrace*"]

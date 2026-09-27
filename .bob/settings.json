@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "wsl bash -c \"cd /mnt/c/Users/Nicolas/Dev/trace_helper && source .venv/bin/activate && python main.py inject --target ./sandbox 2>&1 | tail -1 && echo 'Traces file:' && (test -f traces/traces.jsonl && wc -l < traces/traces.jsonl || echo 0) | xargs -I{} echo '{} traces recorded'\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
