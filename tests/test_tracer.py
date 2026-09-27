@@ -710,3 +710,191 @@ class TestSpanSchema:
         assert "error_type" not in span
         assert "error_message" not in span
         assert "error_location" not in span
+
+
+# ---------------------------------------------------------------------------
+# Upgrade 1 — PII value-pattern redaction
+# ---------------------------------------------------------------------------
+
+
+class TestPIIValuePatterns:
+    def test_credit_card_in_string_value_is_redacted(self):
+        from bobtrace.tracer import _serialize_value, _redact_keys
+        result = _serialize_value("card: 4111111111111111 ok", 6, _redact_keys())
+        assert "***REDACTED***" in result
+        assert "4111111111111111" not in result
+
+    def test_bearer_token_in_string_value_is_redacted(self):
+        from bobtrace.tracer import _serialize_value, _redact_keys
+        result = _serialize_value("Authorization: Bearer eyABC123token", 6, _redact_keys())
+        assert "***REDACTED***" in result
+
+    def test_jwt_in_string_value_is_redacted(self):
+        from bobtrace.tracer import _serialize_value, _redact_keys
+        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        result = _serialize_value(jwt, 6, _redact_keys())
+        assert "***REDACTED***" in result
+
+    def test_aws_key_in_string_value_is_redacted(self):
+        from bobtrace.tracer import _serialize_value, _redact_keys
+        result = _serialize_value("key=AKIAIOSFODNN7EXAMPLE", 6, _redact_keys())
+        assert "***REDACTED***" in result
+
+    def test_plain_string_not_redacted(self):
+        from bobtrace.tracer import _serialize_value, _redact_keys
+        result = _serialize_value("hello world", 6, _redact_keys())
+        assert result == "hello world"
+
+    def test_extended_builtin_keys(self):
+        """secret, api_key, authorization, ssn should be key-redacted."""
+        from bobtrace.tracer import _redact_keys
+        keys = _redact_keys()
+        for k in ("secret", "api_key", "apikey", "authorization", "ssn", "cvv"):
+            assert k in keys
+
+    def test_nested_dict_credit_card_redacted(self):
+        from bobtrace.tracer import _serialize_value, _redact_keys
+        nested = {"payment": {"card": "4111 1111 1111 1111"}}
+        result = _serialize_value(nested, 6, _redact_keys())
+        assert result["payment"]["card"] == "***REDACTED***"
+
+
+# ---------------------------------------------------------------------------
+# Upgrade 2 — W3C Trace Context
+# ---------------------------------------------------------------------------
+
+
+class TestW3CTraceContext:
+    def test_traceparent_header_sets_trace_id(self):
+        """A valid traceparent on the request parameter is inherited as trace_id."""
+        spans = []
+
+        def _capture_flush(buffer, root_span):
+            spans.extend(buffer.spans)
+
+        class FakeHeaders:
+            def get(self, key):
+                if key.lower() == "traceparent":
+                    return "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+                return None
+
+        class FakeRequest:
+            headers = FakeHeaders()
+
+        from bobtrace.tracer import bob_trace, _ctx
+        _ctx.set(None)
+
+        @bob_trace
+        def my_handler(request):
+            return "ok"
+
+        with patch("bobtrace.tracer._flush", side_effect=_capture_flush):
+            my_handler(FakeRequest())
+
+        assert len(spans) == 1
+        # trace_id should be the UUID-formatted version of the traceparent trace id
+        assert spans[0].trace_id == "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
+
+    def test_missing_traceparent_generates_new_trace_id(self):
+        from bobtrace.tracer import bob_trace, _ctx
+        _ctx.set(None)
+        spans = []
+
+        @bob_trace
+        def handler(request):
+            return "ok"
+
+        class FakeRequest:
+            headers = {"other": "value"}
+
+        with patch("bobtrace.tracer._flush", side_effect=lambda b, r: spans.extend(b.spans)):
+            handler(FakeRequest())
+
+        assert len(spans) == 1
+        # Should be a valid UUID4 (not the traceparent value)
+        import uuid as _uuid
+        _uuid.UUID(spans[0].trace_id)  # raises if invalid
+
+    def test_malformed_traceparent_falls_back_to_new_trace_id(self):
+        from bobtrace.tracer import bob_trace, _ctx
+        _ctx.set(None)
+        spans = []
+
+        @bob_trace
+        def handler(request):
+            return "ok"
+
+        class FakeHeaders:
+            def get(self, key):
+                return "not-a-valid-traceparent" if key.lower() == "traceparent" else None
+
+        class FakeRequest:
+            headers = FakeHeaders()
+
+        with patch("bobtrace.tracer._flush", side_effect=lambda b, r: spans.extend(b.spans)):
+            handler(FakeRequest())
+
+        assert len(spans) == 1
+        import uuid as _uuid
+        _uuid.UUID(spans[0].trace_id)  # valid UUID, not the malformed header
+
+
+# ---------------------------------------------------------------------------
+# Upgrade 3 — Async batch exporter
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncBatchExporter:
+    def test_async_exporter_receives_spans(self, tmp_path):
+        """start_async_exporter pushes spans to the queue; stop drains them to disk."""
+        import asyncio
+        from bobtrace.tracer import (
+            start_async_exporter, stop_async_exporter,
+            bob_trace, _ctx, _exporter_state,
+        )
+
+        trace_file = str(tmp_path / "traces.jsonl")
+
+        async def run():
+            _ctx.set(None)
+            with patch.dict(os.environ, {
+                "BOBTRACE_FILE": trace_file,
+                "BOBTRACE_EXPORTER": "async",
+            }):
+                await start_async_exporter()
+
+                @bob_trace
+                async def work():
+                    return 42
+
+                await work()
+                await stop_async_exporter()
+
+        asyncio.run(run())
+
+        import json as _json
+        lines = [l for l in open(trace_file).read().splitlines() if l.strip()]
+        assert len(lines) >= 1
+        span = _json.loads(lines[0])
+        assert span["function_name"] == "work"
+        assert span["status"] == "success"
+
+    def test_sync_flush_unchanged_without_env_var(self, tmp_path):
+        """Default sync flush works when BOBTRACE_EXPORTER is not set."""
+        from bobtrace.tracer import bob_trace, _ctx
+        _ctx.set(None)
+        trace_file = str(tmp_path / "traces.jsonl")
+
+        @bob_trace
+        def sync_fn():
+            return 1
+
+        with patch.dict(os.environ, {"BOBTRACE_FILE": trace_file}):
+            if "BOBTRACE_EXPORTER" in os.environ:
+                del os.environ["BOBTRACE_EXPORTER"]
+            sync_fn()
+
+        import json as _json
+        lines = [l for l in open(trace_file).read().splitlines() if l.strip()]
+        assert len(lines) == 1
+        assert _json.loads(lines[0])["function_name"] == "sync_fn"
