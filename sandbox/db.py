@@ -1,4 +1,3 @@
-from bobtrace.tracer import bob_trace
 import copy
 from typing import Dict, List, Optional
 
@@ -32,7 +31,6 @@ _discount_codes: Dict[str, float] = {
 }
 
 
-@bob_trace
 def get_order(order_id: int) -> Optional[dict]:
     row = _orders.get(order_id)
     if row is None:
@@ -40,7 +38,6 @@ def get_order(order_id: int) -> Optional[dict]:
     return copy.copy(row)
 
 
-@bob_trace
 def get_item(item_id: int) -> Optional[dict]:
     row = _items.get(item_id)
     if row is None:
@@ -48,7 +45,6 @@ def get_item(item_id: int) -> Optional[dict]:
     return copy.copy(row)
 
 
-@bob_trace
 def get_user(user_id: int) -> Optional[dict]:
     row = _users.get(user_id)
     if row is None:
@@ -56,7 +52,6 @@ def get_user(user_id: int) -> Optional[dict]:
     return copy.copy(row)
 
 
-@bob_trace
 def list_orders(user_id: Optional[int] = None) -> List[dict]:
     rows = list(_orders.values())
     if user_id is not None:
@@ -64,7 +59,6 @@ def list_orders(user_id: Optional[int] = None) -> List[dict]:
     return [copy.copy(r) for r in rows]
 
 
-@bob_trace
 def apply_discount(price: float, code: str) -> float:
     rate = _discount_codes.get(code.upper())
     if rate is None:
@@ -72,7 +66,6 @@ def apply_discount(price: float, code: str) -> float:
     return round(price - (price * rate), 2)
 
 
-@bob_trace
 def compute_order_total(order_id: int, discount_code: Optional[str] = None) -> float:
     order = get_order(order_id)
     if order is None:
@@ -90,7 +83,6 @@ def compute_order_total(order_id: int, discount_code: Optional[str] = None) -> f
     return round(total, 2)
 
 
-@bob_trace
 def get_order_summary(order_id: int) -> dict:
     order = get_order(order_id)
     if order is None:
